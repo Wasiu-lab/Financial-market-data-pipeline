@@ -7,7 +7,7 @@ Build a reliable financial market data pipeline that ingests historical and dail
 ## Initial Scope
 
 * Initial Instrument: XAU/USD (Gold vs. US Dollar).
-* Initial Timeframe: Daily (`1day`) candles (OHLCV).
+* Initial Timeframe: Daily (`1day`) candles (OHLC with optional/null volume).
 * Historical Period: 3 years of historical daily backfill data.
 * Continuous Ingestion: Daily incremental updates scheduled following the market daily    close.
 * Future Expansion: Extending coverage to additional FX pairs (e.g., EUR/USD), multi-asset classes, and lower timeframes (e.g., hourly/5-minute intervals).
@@ -19,6 +19,7 @@ Build a reliable financial market data pipeline that ingests historical and dail
 * Validated via API reconnaissance with HTTP 200 responses for both `XAU/USD` (3-year daily backfill producing 781 candles) and `EUR/USD`.
 * Verified structural stability of row-oriented OHLC JSON records formatted in ISO-8601 UTC timestamps (`YYYY-MM-DD`).
 * Confirmed API responsiveness, error handling, rate-limit structures, and multi-instrument endpoint compatibility.
+* Feed fields: `timestamp`, `symbol`, `open`, `high`, `low`, and `close` are mandatory; `volume` is optional and may be null.
 ## Pipeline Architecture
 
 API (Twelve Data)
@@ -61,4 +62,6 @@ Execution metadata, watermarks (`pipeline_watermark`), run logs (`pipeline_run`)
 
 ## Project Status
 
-Drafting initial repository architecture and documentation specifications. Next step is locking the physical repository structure and commencing Milestone 1 — End-to-End Vertical Slice (Twelve Data API → Raw Object Storage → Parquet Staging → Quality Validation → ClickHouse).
+The initial repository architecture and developer configuration are in place. The package boundaries mirror the pipeline architecture, but no ingestion, storage, staging, validation, transformation, ClickHouse, or PostgreSQL implementation exists yet. See [the repository architecture](docs/architecture.md) for the package-to-architecture mapping.
+
+The next milestone is an end-to-end vertical slice: Twelve Data API → raw object storage → Parquet staging → quality validation → ClickHouse.
