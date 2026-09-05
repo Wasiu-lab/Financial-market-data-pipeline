@@ -20,6 +20,23 @@ Build a reliable financial market data pipeline that ingests historical and dail
 * Verified structural stability of row-oriented OHLC JSON records formatted in ISO-8601 UTC timestamps (`YYYY-MM-DD`).
 * Confirmed API responsiveness, error handling, rate-limit structures, and multi-instrument endpoint compatibility.
 * Feed fields: `timestamp`, `symbol`, `open`, `high`, `low`, and `close` are mandatory; `volume` is optional and may be null.
+
+## Canonical Market Data Model
+
+`MarketData` represents one validated market-data candle or observation. It is a generic,
+immutable domain model with these fields: `timestamp`, `symbol`, `timeframe`, `open`,
+`high`, `low`, `close`, and optional `volume`.
+
+The model accepts timezone-aware `datetime` timestamps only and normalizes them to UTC while
+preserving the represented instant. It trims surrounding whitespace from `symbol` and
+`timeframe` without otherwise changing either value.
+
+OHLC values must be finite, strictly positive `Decimal` instances. The model enforces that
+`high` is not below `open` or `close`, and that `low` is not above `open` or `close`.
+`volume` is optional: `None` represents unavailable or inapplicable volume, while
+`Decimal("0")` represents an explicitly reported zero; supplied volume must be a finite,
+non-negative `Decimal`.
+
 ## Pipeline Architecture
 
 API (Twelve Data)
