@@ -1,84 +1,98 @@
 # DE-01 — Financial Market Data Pipeline
 
-## Objective
+DE-01 is a Python financial-market data project that establishes a reliable path from
+provider data to a canonical market-data model. It currently supports a deliberately
+narrow Twelve Data ingestion boundary for XAU/USD candles.
 
-Build a reliable financial market data pipeline that ingests historical and daily XAU/USD market data from an external API, stores raw and transformed datasets, validates data quality, and produces an analytics-ready dataset for analysts, quants and ML engineers.
+## Implemented
 
-## Initial Scope
+### Canonical market-data model
 
-* Initial Instrument: XAU/USD (Gold vs. US Dollar).
-* Initial Timeframe: Daily (`1day`) candles (OHLC with optional/null volume).
-* Historical Period: 3 years of historical daily backfill data.
-* Continuous Ingestion: Daily incremental updates scheduled following the market daily    close.
-* Future Expansion: Extending coverage to additional FX pairs (e.g., EUR/USD), multi-asset classes, and lower timeframes (e.g., hourly/5-minute intervals).
+`MarketData` is an immutable domain model for a validated candle with `timestamp`,
+`symbol`, `timeframe`, OHLC values, and `volume`.
 
-## Data Source
+- Timestamps must be timezone-aware and are normalized to UTC.
+- OHLC values are finite, strictly positive `Decimal` instances with intrinsic candle
+  relationship checks.
+- `volume` is `Decimal | None`: `None` means unavailable or missing volume, while
+  `Decimal("0")` represents an explicitly reported zero volume.
+- Symbol and timeframe values are normalized by trimming surrounding whitespace.
 
-* Provider: Twelve Data API.
-* Reconnaissance & Verification:
-* Validated via API reconnaissance with HTTP 200 responses for both `XAU/USD` (3-year daily backfill producing 781 candles) and `EUR/USD`.
-* Verified structural stability of row-oriented OHLC JSON records formatted in ISO-8601 UTC timestamps (`YYYY-MM-DD`).
-* Confirmed API responsiveness, error handling, rate-limit structures, and multi-instrument endpoint compatibility.
-* Feed fields: `timestamp`, `symbol`, `open`, `high`, `low`, and `close` are mandatory; `volume` is optional and may be null.
+### Twelve Data ingestion
 
-## Canonical Market Data Model
+The Twelve Data adapter uses `httpx` to request `/time_series` data and converts
+provider-specific JSON at the ingestion boundary into canonical `MarketData` objects.
 
-`MarketData` represents one validated market-data candle or observation. It is a generic,
-immutable domain model with these fields: `timestamp`, `symbol`, `timeframe`, `open`,
-`high`, `low`, `close`, and optional `volume`.
+- Initial symbol: `XAU/USD`
+- Supported intervals: `1h` and `1day`
+- Credentials are supplied through `TWELVE_DATA_API_KEY`; no credentials are hard-coded.
+- Numeric provider strings are converted directly to `Decimal` before reaching
+  `MarketData`.
+- Provider, network, response, and parsing failures are represented by ingestion
+  exceptions.
+- Unit tests use mocked HTTP responses; no live API key or live API call is required.
 
-The model accepts timezone-aware `datetime` timestamps only and normalizes them to UTC while
-preserving the represented instant. It trims surrounding whitespace from `symbol` and
-`timeframe` without otherwise changing either value.
+## Planned architecture
 
-OHLC values must be finite, strictly positive `Decimal` instances. The model enforces that
-`high` is not below `open` or `close`, and that `low` is not above `open` or `close`.
-`volume` is optional: `None` represents unavailable or inapplicable volume, while
-`Decimal("0")` represents an explicitly reported zero; supplied volume must be a finite,
-non-negative `Decimal`.
+The following end-to-end architecture remains the target. Only the canonical model and
+the Twelve Data ingestion boundary are implemented today.
 
-## Pipeline Architecture
+```text
+Twelve Data
+  → ingestion                         [implemented]
+  → raw storage                        [planned]
+  → staging / Parquet                  [planned]
+  → validation / data quality          [planned]
+  → transformation                     [planned]
+  → ClickHouse analytics               [planned]
+```
 
-API (Twelve Data)
- ↓
-Ingestion (Config, httpx, rate limits, retries, auth)
- ↓
-Raw Storage (Immutable JSON payloads + ingestion metadata)
- ↓
-Staging (Parse, type casting, UTC normalization, lineage metadata)
- ↓
-Validation (Schema check, OHLC logic integrity, duplicate detection) ──[Invalid]──> Quarantine
- ↓
-Transformation (Canonical candle data model, business logic)
- ↓
-Analytics Storage (ClickHouse `fact_candles`)
- ↓
-Consumers (Analyst, Quant, ML workflows)
+State management, watermarks, scheduling, orchestration, observability, and downstream
+consumer workflows are also future work. No raw storage, Parquet staging, data-quality
+quarantine, database integration, or analytics store is implemented yet.
 
-## State Management
-Execution metadata, watermarks (`pipeline_watermark`), run logs (`pipeline_run`), and data quality audit logs are maintained independently in PostgreSQL.
+## Setup and verification
+
+Python 3.11 or later is required.
+
+```powershell
+# Create and activate a virtual environment.
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+# Install the project and development tools in editable mode.
+py -m pip install -e ".[dev]"
+
+# Supply your own key locally. Never commit a real key.
+$env:TWELVE_DATA_API_KEY = "replace-with-your-own-key"
+
+# Run quality checks.
+py -m ruff check .
+py -m pytest
+```
+
+## Project status and roadmap
+
+**Completed**
+
+- Repository architecture and CI foundation
+- Canonical immutable `MarketData` model
+- Twelve Data ingestion boundary for XAU/USD `1h` and `1day` candles
+
+**Next**
+
+- Controlled live XAU/USD API verification
+- Historical backfill
+- Raw storage
+- Parquet staging
+- Data-quality and quarantine layer
+- Transformations
+- ClickHouse analytics
+- Incremental ingestion and watermarks
+- Scheduling and automation
+- Observability and final documentation
 
 ## Consumers
 
-| Consumer | Purpose |
-| --- | --- |
-| Data Analyst | Exploratory market data analysis, reporting, and dashboarding. |
-| Data Scientist | Statistical distributions, volatility analysis, and exploratory data modeling. |
-| ML Engineer | Feature engineering, training sets, and model pipeline inputs. |
-| Quant | Backtesting trading strategies, risk modeling, and market research. |
-
-## Technology Stack
-
-* Language: Python 3.11+
-* HTTP Client: `httpx` (async API ingestion with retries and backoff handling)
-* Object Storage / Raw & Staging Layer: MinIO / AWS S3 (Raw JSON payloads, Parquet staging format)
-* Analytical Database: ClickHouse (`fact_candles` engine optimized for time-series aggregation)
-* State & Metadata Store: PostgreSQL (Watermarks, run state, execution tracking)
-* Orchestration & Automation: GitHub Actions
-* Containerization: Docker Compose (Local development environment parity)
-
-## Project Status
-
-The initial repository architecture and developer configuration are in place. The package boundaries mirror the pipeline architecture, but no ingestion, storage, staging, validation, transformation, ClickHouse, or PostgreSQL implementation exists yet. See [the repository architecture](docs/architecture.md) for the package-to-architecture mapping.
-
-The next milestone is an end-to-end vertical slice: Twelve Data API → raw object storage → Parquet staging → quality validation → ClickHouse.
+The planned analytics dataset will support analysts, data scientists, ML engineers, and
+quants for exploration, modelling, backtesting, and research.
