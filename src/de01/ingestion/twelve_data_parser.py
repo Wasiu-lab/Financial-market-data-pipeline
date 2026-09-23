@@ -3,10 +3,12 @@
 from collections.abc import Mapping
 from datetime import UTC, datetime, tzinfo
 from decimal import Decimal, InvalidOperation
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo
 
 from de01.ingestion.exceptions import TwelveDataParseError, TwelveDataResponseError
 from de01.market_data import MarketData
+
+_XAU_USD_DAILY_TIMEZONE = ZoneInfo("Australia/Sydney")
 
 
 def parse_time_series_response(
@@ -21,7 +23,7 @@ def parse_time_series_response(
     if not isinstance(values, list):
         raise TwelveDataParseError("response field 'values' must be a list")
 
-    timezone = _timestamp_timezone(interval, metadata)
+    timezone = _timestamp_timezone(interval)
     return [
         _parse_candle(row, index=index, symbol=symbol, interval=interval, timezone=timezone)
         for index, row in enumerate(values)
@@ -45,19 +47,13 @@ def _validate_metadata(metadata: Mapping[str, object], *, symbol: str, interval:
         raise TwelveDataParseError(f"meta field 'interval' must be {interval!r}")
 
 
-def _timestamp_timezone(interval: str, metadata: Mapping[str, object]) -> tzinfo:
+def _timestamp_timezone(interval: str) -> tzinfo:
     if interval == "1h":
         return UTC
-
-    exchange_timezone = metadata.get("exchange_timezone")
-    if not isinstance(exchange_timezone, str) or not exchange_timezone.strip():
-        raise TwelveDataParseError("meta field 'exchange_timezone' must be a non-empty string")
-    try:
-        return ZoneInfo(exchange_timezone)
-    except ZoneInfoNotFoundError as exc:
-        raise TwelveDataParseError(
-            f"meta field 'exchange_timezone' is not a known IANA timezone: {exchange_timezone!r}"
-        ) from exc
+    if interval == "1day":
+        # Twelve Data assigns XAU/USD daily dates to its Australia/Sydney market day.
+        return _XAU_USD_DAILY_TIMEZONE
+    raise TwelveDataParseError(f"Unsupported interval {interval!r}")
 
 
 def _parse_candle(
