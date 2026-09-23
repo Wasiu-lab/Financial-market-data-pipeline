@@ -18,14 +18,15 @@ from de01.ingestion import (
 def _successful_payload(
     *,
     interval: str = "1h",
-    exchange_timezone: str = "UTC",
     candle: dict[str, object] | None = None,
 ) -> dict[str, object]:
     return {
         "meta": {
             "symbol": "XAU/USD",
             "interval": interval,
-            "exchange_timezone": exchange_timezone,
+            "currency_base": "Gold Spot",
+            "currency_quote": "US Dollar",
+            "type": "Precious Metal",
         },
         "values": [
             candle
@@ -96,12 +97,11 @@ def test_successful_hourly_response_is_parsed_to_canonical_market_data() -> None
     assert data[0].volume == Decimal("12.5")
 
 
-def test_daily_response_uses_exchange_timezone_before_market_data_normalizes_to_utc() -> None:
+def test_daily_response_uses_the_xau_usd_sydney_market_day() -> None:
     payload = _successful_payload(
         interval="1day",
-        exchange_timezone="Europe/London",
         candle={
-            "datetime": "2026-09-06",
+            "datetime": "2026-09-24",
             "open": "100",
             "high": "110",
             "low": "90",
@@ -115,7 +115,28 @@ def test_daily_response_uses_exchange_timezone_before_market_data_normalizes_to_
 
     data = _client(httpx.MockTransport(handler)).fetch_time_series("XAU/USD", "1day")
 
-    assert data[0].timestamp == datetime(2026, 9, 5, 23, tzinfo=UTC)
+    assert data[0].timestamp == datetime(2026, 9, 23, 14, tzinfo=UTC)
+    assert data[0].volume is None
+
+
+def test_daily_response_uses_sydney_daylight_saving_time() -> None:
+    payload = _successful_payload(
+        interval="1day",
+        candle={
+            "datetime": "2026-12-24",
+            "open": "100",
+            "high": "110",
+            "low": "90",
+            "close": "105",
+        },
+    )
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    data = _client(httpx.MockTransport(handler)).fetch_time_series("XAU/USD", "1day")
+
+    assert data[0].timestamp == datetime(2026, 12, 23, 13, tzinfo=UTC)
 
 
 @pytest.mark.parametrize(
