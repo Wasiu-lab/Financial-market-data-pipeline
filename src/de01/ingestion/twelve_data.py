@@ -1,11 +1,15 @@
 """Twelve Data time-series client."""
 
 from collections.abc import Mapping
+from datetime import datetime
 
 import httpx
 
 from de01.ingestion.exceptions import TwelveDataRequestError, TwelveDataResponseError
-from de01.ingestion.twelve_data_parser import parse_time_series_response
+from de01.ingestion.twelve_data_parser import (
+    parse_earliest_timestamp_response,
+    parse_time_series_response,
+)
 from de01.market_data import MarketData
 
 _BASE_URL = "https://api.twelvedata.com"
@@ -22,11 +26,36 @@ class TwelveDataClient:
         self._api_key = api_key.strip()
         self._client = client
 
-    def fetch_time_series(self, symbol: str, interval: str) -> list[MarketData]:
+    def fetch_time_series(
+        self,
+        symbol: str,
+        interval: str,
+        *,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        order: str | None = None,
+    ) -> list[MarketData]:
         """Fetch XAU/USD candles for a supported interval."""
         self._validate_request(symbol, interval)
-        response_data = self._request_time_series(symbol, interval)
+        params = {"symbol": symbol, "interval": interval}
+        if start_date is not None:
+            params["start_date"] = start_date
+        if end_date is not None:
+            params["end_date"] = end_date
+        if order is not None:
+            params["order"] = order
+        if interval == "1h":
+            params["timezone"] = "UTC"
+        response_data = self._request("/time_series", params)
         return parse_time_series_response(response_data, symbol=symbol, interval=interval)
+
+    def fetch_earliest_timestamp(self, symbol: str, interval: str) -> datetime:
+        """Return the provider's earliest available candle as a UTC instant."""
+        self._validate_request(symbol, interval)
+        response_data = self._request(
+            "/earliest_timestamp", {"symbol": symbol, "interval": interval}
+        )
+        return parse_earliest_timestamp_response(response_data, interval=interval)
 
     def _validate_request(self, symbol: str, interval: str) -> None:
         if symbol != _SUPPORTED_SYMBOL:
@@ -34,19 +63,15 @@ class TwelveDataClient:
         if interval not in _SUPPORTED_INTERVALS:
             raise ValueError(f"Unsupported interval {interval!r}; expected '1h' or '1day'")
 
-    def _request_time_series(self, symbol: str, interval: str) -> Mapping[str, object]:
-        params = {"symbol": symbol, "interval": interval}
-        if interval == "1h":
-            params["timezone"] = "UTC"
-
+    def _request(self, path: str, params: dict[str, str]) -> Mapping[str, object]:
         try:
             if self._client is not None:
                 response = self._client.get(
-                    "/time_series", params=params, headers=self._headers(), timeout=10.0
+                    path, params=params, headers=self._headers(), timeout=10.0
                 )
             else:
                 with httpx.Client(base_url=_BASE_URL, timeout=10.0) as client:
-                    response = client.get("/time_series", params=params, headers=self._headers())
+                    response = client.get(path, params=params, headers=self._headers())
             response.raise_for_status()
         except httpx.RequestError as exc:
             raise TwelveDataRequestError("Twelve Data request failed") from exc
