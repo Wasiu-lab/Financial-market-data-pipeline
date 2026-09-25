@@ -30,6 +30,20 @@ def parse_time_series_response(
     ]
 
 
+def parse_earliest_timestamp_response(payload: object, *, interval: str) -> datetime:
+    """Parse Twelve Data's earliest timestamp into a canonical UTC instant."""
+    response = _require_mapping(payload, "response")
+    if "status" in response:
+        _validate_status(response)
+    timezone = _timestamp_timezone(interval)
+    return _parse_timestamp(
+        response.get("datetime"),
+        location="response field 'datetime'",
+        interval=interval,
+        timezone=timezone,
+    ).astimezone(UTC)
+
+
 def _validate_status(response: Mapping[str, object]) -> None:
     status = response.get("status")
     if status == "error":
@@ -62,7 +76,12 @@ def _parse_candle(
     candle = _require_mapping(row, f"row {index}")
     try:
         return MarketData(
-            timestamp=_parse_timestamp(candle.get("datetime"), index=index, interval=interval, timezone=timezone),
+            timestamp=_parse_timestamp(
+                candle.get("datetime"),
+                location=f"row {index} field 'datetime'",
+                interval=interval,
+                timezone=timezone,
+            ),
             symbol=symbol,
             timeframe=interval,
             open=_parse_decimal(candle.get("open"), field_name="open", index=index),
@@ -77,17 +96,17 @@ def _parse_candle(
         raise TwelveDataParseError(f"row {index}: invalid candle: {exc}") from exc
 
 
-def _parse_timestamp(value: object, *, index: int, interval: str, timezone: tzinfo) -> datetime:
+def _parse_timestamp(value: object, *, location: str, interval: str, timezone: tzinfo) -> datetime:
     if not isinstance(value, str) or not value.strip():
-        raise TwelveDataParseError(f"row {index} field 'datetime' must be a non-empty string")
+        raise TwelveDataParseError(f"{location} must be a non-empty string")
     if interval == "1h" and "T" not in value and " " not in value:
-        raise TwelveDataParseError(f"row {index} field 'datetime' must include a time component")
+        raise TwelveDataParseError(f"{location} must include a time component")
     try:
         timestamp = datetime.fromisoformat(value)
     except ValueError as exc:
-        raise TwelveDataParseError(f"row {index} field 'datetime' is not ISO-8601: {value!r}") from exc
+        raise TwelveDataParseError(f"{location} is not ISO-8601: {value!r}") from exc
     if timestamp.tzinfo is not None:
-        raise TwelveDataParseError(f"row {index} field 'datetime' must not include a timezone offset")
+        raise TwelveDataParseError(f"{location} must not include a timezone offset")
     return timestamp.replace(tzinfo=timezone)
 
 
