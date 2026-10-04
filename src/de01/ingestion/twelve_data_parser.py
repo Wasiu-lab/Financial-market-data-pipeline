@@ -23,11 +23,23 @@ def parse_time_series_response(
     if not isinstance(values, list):
         raise TwelveDataParseError("response field 'values' must be a list")
 
-    timezone = _timestamp_timezone(interval)
     return [
-        _parse_candle(row, index=index, symbol=symbol, interval=interval, timezone=timezone)
+        parse_time_series_row(row, index=index, symbol=symbol, interval=interval)
         for index, row in enumerate(values)
     ]
+
+
+def parse_time_series_row(
+    row: object, *, index: int, symbol: str, interval: str
+) -> MarketData:
+    """Decode one retained provider row into a canonical candle."""
+    return _parse_candle(
+        row,
+        index=index,
+        symbol=symbol,
+        interval=interval,
+        timezone=_timestamp_timezone(interval),
+    )
 
 
 def parse_earliest_timestamp_response(payload: object, *, interval: str) -> datetime:

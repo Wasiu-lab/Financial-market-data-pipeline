@@ -36,6 +36,25 @@ class TwelveDataClient:
         order: str | None = None,
     ) -> list[MarketData]:
         """Fetch XAU/USD candles for a supported interval."""
+        response_data = self.fetch_time_series_payload(
+            symbol,
+            interval,
+            start_date=start_date,
+            end_date=end_date,
+            order=order,
+        )
+        return parse_time_series_response(response_data, symbol=symbol, interval=interval)
+
+    def fetch_time_series_payload(
+        self,
+        symbol: str,
+        interval: str,
+        *,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        order: str | None = None,
+    ) -> Mapping[str, object]:
+        """Fetch a successful provider payload without parsing or filtering its rows."""
         self._validate_request(symbol, interval)
         params = {"symbol": symbol, "interval": interval}
         if start_date is not None:
@@ -46,8 +65,7 @@ class TwelveDataClient:
             params["order"] = order
         if interval == "1h":
             params["timezone"] = "UTC"
-        response_data = self._request("/time_series", params)
-        return parse_time_series_response(response_data, symbol=symbol, interval=interval)
+        return self._request("/time_series", params)
 
     def fetch_earliest_timestamp(self, symbol: str, interval: str) -> datetime:
         """Return the provider's earliest available candle as a UTC instant."""
