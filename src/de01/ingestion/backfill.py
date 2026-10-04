@@ -1,9 +1,18 @@
 """Historical backfill reconstruction for the supported Twelve Data feed."""
 
+from collections.abc import Mapping
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from de01.ingestion.exceptions import TwelveDataParseError
+from de01.ingestion.batch import (
+    IngestionBatch,
+    ProviderRow,
+    RecordRef,
+    RequestWindow,
+    WindowBatch,
+    WindowDiagnosticKind,
+)
+from de01.ingestion.exceptions import TwelveDataError, TwelveDataParseError
 from de01.ingestion.twelve_data import TwelveDataClient
 from de01.market_data import MarketData
 
@@ -47,6 +56,73 @@ def backfill_time_series(
             candles.setdefault((candle.symbol, candle.timeframe, candle.timestamp), candle)
 
     return sorted(candles.values(), key=lambda candle: candle.timestamp)
+
+
+def fetch_backfill_batch(
+    client: TwelveDataClient,
+    *,
+    symbol: str,
+    timeframe: str,
+    start: date | datetime,
+    end: date | datetime,
+) -> IngestionBatch:
+    """Fetch a backfill with raw provider-row provenance for quality validation."""
+    requested_start = _normalize_boundary(start, timeframe=timeframe)
+    requested_end = _normalize_boundary(end, timeframe=timeframe)
+    provider_earliest = client.fetch_earliest_timestamp(symbol, timeframe)
+    effective_start = max(requested_start, provider_earliest)
+    if not _has_requestable_history(effective_start, requested_end, timeframe=timeframe):
+        return IngestionBatch(
+            symbol, timeframe, requested_start, requested_end, effective_start, provider_earliest, ()
+        )
+
+    planned = _build_windows(effective_start, requested_end, timeframe=timeframe)
+    batches: list[WindowBatch] = []
+    for index, (window_start, window_end) in enumerate(planned):
+        overlap = window_start if timeframe == "1h" and index else None
+        window = RequestWindow(index, symbol, timeframe, window_start, window_end, overlap)
+        try:
+            payload = client.fetch_time_series_payload(
+                symbol,
+                timeframe,
+                start_date=_format_boundary(window_start, timeframe=timeframe),
+                end_date=_format_boundary(window_end, timeframe=timeframe),
+                order="asc" if timeframe == "1h" else None,
+            )
+        except TwelveDataError as exc:
+            batches.append(
+                WindowBatch(
+                    window,
+                    None,
+                    (),
+                    str(exc),
+                    WindowDiagnosticKind.WINDOW_FAILURE,
+                )
+            )
+            continue
+        batches.append(_make_window_batch(window, payload))
+    return IngestionBatch(
+        symbol, timeframe, requested_start, requested_end, effective_start, provider_earliest, tuple(batches)
+    )
+
+
+def _make_window_batch(window: RequestWindow, payload: Mapping[str, object]) -> WindowBatch:
+    metadata = payload.get("meta")
+    values = payload.get("values")
+    if (
+        payload.get("status") != "ok"
+        or not isinstance(metadata, Mapping)
+        or not isinstance(values, list)
+    ):
+        return WindowBatch(
+            window,
+            metadata,
+            (),
+            "successful response has invalid status, meta, or values",
+            WindowDiagnosticKind.MALFORMED_RESPONSE,
+        )
+    rows = tuple(ProviderRow(RecordRef(window.window_id, index), row) for index, row in enumerate(values))
+    return WindowBatch(window, metadata, rows)
 
 
 def _normalize_boundary(value: date | datetime, *, timeframe: str) -> datetime:
