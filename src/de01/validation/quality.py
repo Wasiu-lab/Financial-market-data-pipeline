@@ -6,7 +6,13 @@ from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from de01.ingestion.batch import IngestionBatch, ProviderRow, RequestWindow, WindowBatch
+from de01.ingestion.batch import (
+    IngestionBatch,
+    ProviderRow,
+    RequestWindow,
+    WindowBatch,
+    WindowDiagnosticKind,
+)
 from de01.ingestion.exceptions import TwelveDataError
 from de01.ingestion.twelve_data_parser import parse_time_series_row
 from de01.market_data import MarketData
@@ -43,10 +49,15 @@ def validate_batch(batch: IngestionBatch, *, policy: QualityPolicy | None = None
 
     for window_batch in batch.windows:
         if window_batch.fatal_diagnostic is not None:
-            issues.append(
-                QualityIssue(IssueCode.MALFORMED_RESPONSE, window_batch.fatal_diagnostic, fatal=True)
+            code = (
+                IssueCode.WINDOW_FAILURE
+                if window_batch.fatal_diagnostic_kind == WindowDiagnosticKind.WINDOW_FAILURE
+                else IssueCode.MALFORMED_RESPONSE
             )
-        if (
+            issues.append(
+                QualityIssue(code, window_batch.fatal_diagnostic, fatal=True)
+            )
+        elif (
             not isinstance(window_batch.metadata, Mapping)
             or window_batch.metadata.get("symbol") != batch.symbol
             or window_batch.metadata.get("interval") != batch.timeframe

@@ -16,6 +16,7 @@ from de01.ingestion import (
     RequestWindow,
     TwelveDataClient,
     WindowBatch,
+    WindowDiagnosticKind,
     fetch_backfill_batch,
 )
 from de01.validation import IssueCode, QualityDecision, QualityPolicy, validate_batch
@@ -327,7 +328,68 @@ def test_batch_fetch_retains_row_provenance_without_api_key() -> None:
 
     assert batch.windows[0].rows[0].ref == RecordRef(0, 0)
     assert batch.windows[0].window.start == datetime(2026, 1, 1, tzinfo=UTC)
+    assert batch.windows[0].fatal_diagnostic is None
     assert "secret-key" not in repr(batch)
+
+
+@pytest.mark.parametrize("status", [None, "pending"])
+def test_invalid_successful_payload_status_is_a_malformed_response(status: str | None) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/earliest_timestamp":
+            return httpx.Response(200, json={"status": "ok", "datetime": "2026-01-01 00:00:00"})
+        payload: dict[str, object] = {
+            "meta": {"symbol": "XAU/USD", "interval": "1h"},
+            "values": [_raw("2026-01-01 00:00:00")],
+        }
+        if status is not None:
+            payload["status"] = status
+        return httpx.Response(200, json=payload)
+
+    client = TwelveDataClient(
+        "test",
+        client=httpx.Client(
+            base_url="https://api.twelvedata.com", transport=httpx.MockTransport(handler)
+        ),
+    )
+    batch = fetch_backfill_batch(
+        client,
+        symbol="XAU/USD",
+        timeframe="1h",
+        start=datetime(2026, 1, 1, tzinfo=UTC),
+        end=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    report = validate_batch(batch)
+
+    assert batch.windows[0].rows == ()
+    assert batch.windows[0].fatal_diagnostic_kind == WindowDiagnosticKind.MALFORMED_RESPONSE
+    assert report.decision == QualityDecision.QUARANTINE
+    assert IssueCode.MALFORMED_RESPONSE in {issue.code for issue in report.issues}
+
+
+def test_provider_error_response_becomes_a_window_failure() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/earliest_timestamp":
+            return httpx.Response(200, json={"status": "ok", "datetime": "2026-01-01 00:00:00"})
+        return httpx.Response(200, json={"status": "error", "code": 400, "message": "invalid"})
+
+    client = TwelveDataClient(
+        "test",
+        client=httpx.Client(
+            base_url="https://api.twelvedata.com", transport=httpx.MockTransport(handler)
+        ),
+    )
+    batch = fetch_backfill_batch(
+        client,
+        symbol="XAU/USD",
+        timeframe="1h",
+        start=datetime(2026, 1, 1, tzinfo=UTC),
+        end=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    report = validate_batch(batch)
+
+    assert batch.windows[0].fatal_diagnostic_kind == WindowDiagnosticKind.WINDOW_FAILURE
+    assert report.decision == QualityDecision.QUARANTINE
+    assert IssueCode.WINDOW_FAILURE in {issue.code for issue in report.issues}
 
 
 def test_batch_fetch_retains_malformed_rows_and_window_failures_as_diagnostics() -> None:
@@ -348,6 +410,10 @@ def test_batch_fetch_retains_malformed_rows_and_window_failures_as_diagnostics()
     client = TwelveDataClient("test", client=httpx.Client(base_url="https://api.twelvedata.com", transport=httpx.MockTransport(failing_handler)))
     batch = fetch_backfill_batch(client, symbol="XAU/USD", timeframe="1h", start=datetime(2026, 1, 1, tzinfo=UTC), end=datetime(2026, 1, 1, tzinfo=UTC))
     assert batch.windows[0].fatal_diagnostic is not None
+    assert batch.windows[0].fatal_diagnostic_kind == WindowDiagnosticKind.WINDOW_FAILURE
+    report = validate_batch(batch)
+    assert report.decision == QualityDecision.QUARANTINE
+    assert IssueCode.WINDOW_FAILURE in {issue.code for issue in report.issues}
 
 
 def test_provenance_objects_deep_freeze_raw_rows_and_metadata() -> None:

@@ -1,7 +1,14 @@
 """Ingestion boundary for DE-01."""
 
 from de01.ingestion.backfill import backfill_time_series, fetch_backfill_batch
-from de01.ingestion.batch import IngestionBatch, ProviderRow, RecordRef, RequestWindow, WindowBatch
+from de01.ingestion.batch import (
+    IngestionBatch,
+    ProviderRow,
+    RecordRef,
+    RequestWindow,
+    WindowBatch,
+    WindowDiagnosticKind,
+)
 from de01.ingestion.exceptions import (
     TwelveDataError,
     TwelveDataParseError,
@@ -21,6 +28,7 @@ __all__ = [
     "TwelveDataRequestError",
     "TwelveDataResponseError",
     "WindowBatch",
+    "WindowDiagnosticKind",
     "backfill_time_series",
     "fetch_backfill_batch",
 ]

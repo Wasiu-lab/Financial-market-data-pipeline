@@ -3,6 +3,7 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 from types import MappingProxyType
 
 
@@ -13,6 +14,13 @@ def freeze_value(value: object) -> object:
     if isinstance(value, (list, tuple)):
         return tuple(freeze_value(item) for item in value)
     return value
+
+
+class WindowDiagnosticKind(StrEnum):
+    """Classification of a fatal window diagnostic."""
+
+    WINDOW_FAILURE = "WINDOW_FAILURE"
+    MALFORMED_RESPONSE = "MALFORMED_RESPONSE"
 
 
 @dataclass(frozen=True)
@@ -54,6 +62,7 @@ class WindowBatch:
     metadata: object | None
     rows: tuple[ProviderRow, ...]
     fatal_diagnostic: str | None = None
+    fatal_diagnostic_kind: WindowDiagnosticKind | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "metadata", freeze_value(self.metadata))

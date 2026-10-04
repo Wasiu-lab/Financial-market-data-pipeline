@@ -10,6 +10,7 @@ from de01.ingestion.batch import (
     RecordRef,
     RequestWindow,
     WindowBatch,
+    WindowDiagnosticKind,
 )
 from de01.ingestion.exceptions import TwelveDataError, TwelveDataParseError
 from de01.ingestion.twelve_data import TwelveDataClient
@@ -89,7 +90,15 @@ def fetch_backfill_batch(
                 order="asc" if timeframe == "1h" else None,
             )
         except TwelveDataError as exc:
-            batches.append(WindowBatch(window, None, (), str(exc)))
+            batches.append(
+                WindowBatch(
+                    window,
+                    None,
+                    (),
+                    str(exc),
+                    WindowDiagnosticKind.WINDOW_FAILURE,
+                )
+            )
             continue
         batches.append(_make_window_batch(window, payload))
     return IngestionBatch(
@@ -100,8 +109,18 @@ def fetch_backfill_batch(
 def _make_window_batch(window: RequestWindow, payload: Mapping[str, object]) -> WindowBatch:
     metadata = payload.get("meta")
     values = payload.get("values")
-    if not isinstance(metadata, Mapping) or not isinstance(values, list):
-        return WindowBatch(window, metadata, (), "successful response has invalid meta or values")
+    if (
+        payload.get("status") != "ok"
+        or not isinstance(metadata, Mapping)
+        or not isinstance(values, list)
+    ):
+        return WindowBatch(
+            window,
+            metadata,
+            (),
+            "successful response has invalid status, meta, or values",
+            WindowDiagnosticKind.MALFORMED_RESPONSE,
+        )
     rows = tuple(ProviderRow(RecordRef(window.window_id, index), row) for index, row in enumerate(values))
     return WindowBatch(window, metadata, rows)
 
